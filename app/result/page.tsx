@@ -8,6 +8,7 @@ interface ActionItem {
   assignee: string;
   deadline: string;
   task: string;
+  priority?: string;
 }
 
 interface MeetResult {
@@ -119,6 +120,7 @@ export default function ResultPage() {
                     <div className="flex gap-3 mt-1 flex-wrap">
                       <Badge icon="👤" label={item.assignee} />
                       <Badge icon="📅" label={item.deadline} />
+                      {item.priority && <PriorityBadge priority={item.priority} />}
                     </div>
                   </div>
                 </div>
@@ -165,6 +167,20 @@ function Badge({ icon, label }: { icon: string; label: string }) {
   return (
     <span className="inline-flex items-center gap-1 text-xs text-slate-500 bg-white border border-slate-200 px-2 py-0.5 rounded-full">
       {icon} {label}
+    </span>
+  );
+}
+
+function PriorityBadge({ priority }: { priority: string }) {
+  const styles: Record<string, string> = {
+    높음: "bg-red-50 text-red-600 border-red-200",
+    중간: "bg-amber-50 text-amber-600 border-amber-200",
+    낮음: "bg-slate-50 text-slate-500 border-slate-200",
+  };
+  const cls = styles[priority] ?? styles["중간"];
+  return (
+    <span className={`inline-flex items-center gap-1 text-xs font-medium border px-2 py-0.5 rounded-full ${cls}`}>
+      {priority === "높음" ? "🔴" : priority === "낮음" ? "🟢" : "🟡"} {priority}
     </span>
   );
 }
