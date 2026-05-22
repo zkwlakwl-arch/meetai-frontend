@@ -1,8 +1,9 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import Nav from "../components/Nav";
+import { getUserId } from "../lib/userId";
 
 interface ActionItem {
   assignee: string;
@@ -18,13 +19,22 @@ interface MeetResult {
     summary: string[];
     decisions: string[];
     action_items: ActionItem[];
+    next_meeting?: string;
   };
 }
+
+type NotifyState = "countdown" | "sending" | "sent" | "cancelled";
 
 export default function ResultPage() {
   const router = useRouter();
   const [data, setData] = useState<MeetResult | null>(null);
-  const [slackSent] = useState(true);
+  const [notifyState, setNotifyState] = useState<NotifyState>("countdown");
+  const [countdown, setCountdown] = useState(30);
+  const [email, setEmail] = useState("");
+  const [copied, setCopied] = useState(false);
+  const cancelledRef = useRef(false);
+
+  const apiUrl = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
 
   useEffect(() => {
     const raw = sessionStorage.getItem("meetResult");
@@ -34,6 +44,65 @@ export default function ResultPage() {
     }
     setData(JSON.parse(raw));
   }, [router]);
+
+  // 30초 카운트다운
+  useEffect(() => {
+    if (!data || notifyState !== "countdown") return;
+
+    if (countdown <= 0) {
+      sendNotifications();
+      return;
+    }
+
+    const timer = setInterval(() => {
+      setCountdown((c) => {
+        if (c <= 1) {
+          clearInterval(timer);
+          if (!cancelledRef.current) sendNotifications();
+          return 0;
+        }
+        return c - 1;
+      });
+    }, 1000);
+
+    return () => clearInterval(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [data, notifyState]);
+
+  const sendNotifications = async () => {
+    if (cancelledRef.current || !data?.db_id) {
+      setNotifyState("sent");
+      return;
+    }
+    setNotifyState("sending");
+    try {
+      await fetch(`${apiUrl}/meetings/${data.db_id}/notify`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "X-User-ID": getUserId(),
+        },
+        body: JSON.stringify({ email: email || null }),
+      });
+    } catch {
+      // 발송 실패해도 결과는 유지
+    }
+    setNotifyState("sent");
+  };
+
+  const cancelSend = () => {
+    cancelledRef.current = true;
+    setNotifyState("cancelled");
+  };
+
+  const copyShareLink = () => {
+    if (!data?.db_id) return;
+    const url = `${window.location.origin}/result/${data.db_id}`;
+    navigator.clipboard.writeText(url).then(() => {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    });
+  };
 
   if (!data) return null;
 
@@ -45,38 +114,37 @@ export default function ResultPage() {
 
       <main className="flex-1 max-w-3xl mx-auto w-full px-6 py-10 space-y-6">
         {/* 헤더 */}
-        <div className="flex items-center justify-between">
+        <div className="flex items-center justify-between flex-wrap gap-3">
           <div>
             <h2 className="text-xl font-bold text-[#1a3a6b]">분석 결과</h2>
             <p className="text-sm text-slate-400 mt-0.5">{filename}</p>
           </div>
-          <div className="flex items-center gap-6">
+          <div className="flex items-center gap-3">
             {db_id && (
-              <span className="text-xs text-slate-400">DB #{db_id}</span>
-            )}
-            {slackSent && (
-              <span className="inline-flex items-center gap-1.5 bg-green-50 text-green-700 text-xs font-medium px-3 py-1.5 rounded-full border border-green-200">
-                <svg
-                  className="w-3.5 h-3.5"
-                  fill="none"
-                  viewBox="0 0 24 24"
-                  stroke="currentColor"
-                  strokeWidth={2.5}
-                >
-                  <path
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    d="M4.5 12.75l6 6 9-13.5"
-                  />
-                </svg>
-                Slack 발송 완료
-              </span>
+              <button
+                onClick={copyShareLink}
+                className="inline-flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-full border border-slate-200 text-slate-500 hover:bg-slate-50 transition-colors"
+              >
+                {copied ? "✓ 복사됨" : "🔗 공유 링크"}
+              </button>
             )}
           </div>
         </div>
 
+        {/* 30초 발송 배너 */}
+        {data?.db_id && (
+          <NotifyBanner
+            state={notifyState}
+            countdown={countdown}
+            email={email}
+            onEmailChange={setEmail}
+            onSendNow={sendNotifications}
+            onCancel={cancelSend}
+          />
+        )}
+
         {/* 회의 요약 */}
-        <Section title="📋 회의 요약" color="blue">
+        <Section title="📋 회의 요약">
           <ul className="space-y-2">
             {result.summary.map((line, i) => (
               <li key={i} className="flex gap-2 text-slate-700 text-sm leading-relaxed">
@@ -88,7 +156,7 @@ export default function ResultPage() {
         </Section>
 
         {/* 결정사항 */}
-        <Section title="✅ 결정사항" color="indigo">
+        <Section title="✅ 결정사항">
           {result.decisions.length > 0 ? (
             <ul className="space-y-2">
               {result.decisions.map((d, i) => (
@@ -104,7 +172,7 @@ export default function ResultPage() {
         </Section>
 
         {/* 액션아이템 */}
-        <Section title="📌 액션아이템" color="amber">
+        <Section title="📌 액션아이템">
           {result.action_items.length > 0 ? (
             <div className="space-y-3">
               {result.action_items.map((item, i) => (
@@ -131,6 +199,13 @@ export default function ResultPage() {
           )}
         </Section>
 
+        {/* 다음 회의 */}
+        {result.next_meeting && (
+          <Section title="📅 다음 회의">
+            <p className="text-sm text-slate-700">{result.next_meeting}</p>
+          </Section>
+        )}
+
         <button
           onClick={() => {
             sessionStorage.removeItem("meetResult");
@@ -145,14 +220,91 @@ export default function ResultPage() {
   );
 }
 
-function Section({
-  title,
-  children,
+function NotifyBanner({
+  state,
+  countdown,
+  email,
+  onEmailChange,
+  onSendNow,
+  onCancel,
 }: {
-  title: string;
-  color: string;
-  children: React.ReactNode;
+  state: NotifyState;
+  countdown: number;
+  email: string;
+  onEmailChange: (v: string) => void;
+  onSendNow: () => void;
+  onCancel: () => void;
 }) {
+  if (state === "sent") {
+    return (
+      <div className="flex items-center gap-2 bg-green-50 border border-green-200 rounded-xl px-4 py-3 text-sm text-green-700">
+        <span>✓</span>
+        <span>Slack / KakaoWork 발송 완료</span>
+      </div>
+    );
+  }
+
+  if (state === "cancelled") {
+    return (
+      <div className="flex items-center justify-between bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 text-sm text-slate-500">
+        <span>발송 취소됨</span>
+        <button onClick={onSendNow} className="text-[#1a3a6b] font-medium hover:underline">
+          지금 발송
+        </button>
+      </div>
+    );
+  }
+
+  if (state === "sending") {
+    return (
+      <div className="flex items-center gap-2 bg-blue-50 border border-blue-200 rounded-xl px-4 py-3 text-sm text-blue-700">
+        <div className="w-4 h-4 rounded-full border-2 border-blue-500 border-t-transparent animate-spin" />
+        <span>발송 중...</span>
+      </div>
+    );
+  }
+
+  // countdown
+  const progress = ((30 - countdown) / 30) * 100;
+
+  return (
+    <div className="bg-white border border-slate-200 rounded-xl overflow-hidden shadow-sm">
+      {/* 프로그레스 바 */}
+      <div className="h-1 bg-slate-100">
+        <div
+          className="h-1 bg-[#1a3a6b] transition-all duration-1000"
+          style={{ width: `${progress}%` }}
+        />
+      </div>
+      <div className="px-4 py-3 flex items-center gap-3 flex-wrap">
+        <span className="text-sm text-slate-600 flex-1">
+          <span className="font-semibold text-[#1a3a6b]">{countdown}초</span> 후 Slack · KakaoWork 발송
+        </span>
+        <input
+          type="email"
+          value={email}
+          onChange={(e) => onEmailChange(e.target.value)}
+          placeholder="이메일도 받기 (선택)"
+          className="text-xs px-3 py-1.5 rounded-lg border border-slate-200 focus:outline-none focus:ring-1 focus:ring-[#1a3a6b] w-44"
+        />
+        <button
+          onClick={onSendNow}
+          className="text-xs bg-[#1a3a6b] text-white px-3 py-1.5 rounded-lg hover:bg-[#15306a] transition-colors"
+        >
+          지금 발송
+        </button>
+        <button
+          onClick={onCancel}
+          className="text-xs text-slate-400 hover:text-slate-600 transition-colors"
+        >
+          취소
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function Section({ title, children }: { title: string; children: React.ReactNode }) {
   return (
     <div className="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden">
       <div className="px-5 py-3.5 border-b border-slate-100 bg-slate-50/60">
