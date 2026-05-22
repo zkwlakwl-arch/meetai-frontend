@@ -30,7 +30,6 @@ export default function ResultPage() {
   const [data, setData] = useState<MeetResult | null>(null);
   const [notifyState, setNotifyState] = useState<NotifyState>("countdown");
   const [countdown, setCountdown] = useState(30);
-  const [email, setEmail] = useState("");
   const [copied, setCopied] = useState(false);
   const cancelledRef = useRef(false);
 
@@ -82,7 +81,7 @@ export default function ResultPage() {
           "Content-Type": "application/json",
           "X-User-ID": getUserId(),
         },
-        body: JSON.stringify({ email: email || null }),
+        body: JSON.stringify({}),
       });
     } catch {
       // 발송 실패해도 결과는 유지
@@ -136,8 +135,6 @@ export default function ResultPage() {
           <NotifyBanner
             state={notifyState}
             countdown={countdown}
-            email={email}
-            onEmailChange={setEmail}
             onSendNow={sendNotifications}
             onCancel={cancelSend}
           />
@@ -223,15 +220,11 @@ export default function ResultPage() {
 function NotifyBanner({
   state,
   countdown,
-  email,
-  onEmailChange,
   onSendNow,
   onCancel,
 }: {
   state: NotifyState;
   countdown: number;
-  email: string;
-  onEmailChange: (v: string) => void;
   onSendNow: () => void;
   onCancel: () => void;
 }) {
@@ -280,13 +273,6 @@ function NotifyBanner({
         <span className="text-sm text-slate-600 flex-1">
           <span className="font-semibold text-[#1a3a6b]">{countdown}초</span> 후 Slack · KakaoWork 발송
         </span>
-        <input
-          type="email"
-          value={email}
-          onChange={(e) => onEmailChange(e.target.value)}
-          placeholder="이메일도 받기 (선택)"
-          className="text-xs px-3 py-1.5 rounded-lg border border-slate-200 focus:outline-none focus:ring-1 focus:ring-[#1a3a6b] w-44"
-        />
         <button
           onClick={onSendNow}
           className="text-xs bg-[#1a3a6b] text-white px-3 py-1.5 rounded-lg hover:bg-[#15306a] transition-colors"
